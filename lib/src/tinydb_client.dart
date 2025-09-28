@@ -59,7 +59,8 @@ class FieldDefinition {
     bool allowNull = false,
     String? description,
     List<String>? values,
-  }) => FieldDefinition._internal(
+  }) =>
+      FieldDefinition._internal(
         type: FieldType.string,
         required: required,
         allowNull: allowNull,
@@ -71,7 +72,8 @@ class FieldDefinition {
     bool required = false,
     bool allowNull = false,
     String? description,
-  }) => FieldDefinition._internal(
+  }) =>
+      FieldDefinition._internal(
         type: FieldType.number,
         required: required,
         allowNull: allowNull,
@@ -82,7 +84,8 @@ class FieldDefinition {
     bool required = false,
     bool allowNull = false,
     String? description,
-  }) => FieldDefinition._internal(
+  }) =>
+      FieldDefinition._internal(
         type: FieldType.boolean,
         required: required,
         allowNull: allowNull,
@@ -93,7 +96,8 @@ class FieldDefinition {
     bool required = false,
     bool allowNull = false,
     String? description,
-  }) => FieldDefinition._internal(
+  }) =>
+      FieldDefinition._internal(
         type: FieldType.uuid,
         required: required,
         allowNull: allowNull,
@@ -104,7 +108,8 @@ class FieldDefinition {
     bool required = false,
     bool allowNull = false,
     String? description,
-  }) => FieldDefinition._internal(
+  }) =>
+      FieldDefinition._internal(
         type: FieldType.date,
         required: required,
         allowNull: allowNull,
@@ -115,7 +120,8 @@ class FieldDefinition {
     bool required = false,
     bool allowNull = false,
     String? description,
-  }) => FieldDefinition._internal(
+  }) =>
+      FieldDefinition._internal(
         type: FieldType.datetime,
         required: required,
         allowNull: allowNull,
@@ -126,7 +132,8 @@ class FieldDefinition {
     bool required = false,
     bool allowNull = false,
     String? description,
-  }) => FieldDefinition._internal(
+  }) =>
+      FieldDefinition._internal(
         type: FieldType.object,
         required: required,
         allowNull: allowNull,
@@ -138,7 +145,8 @@ class FieldDefinition {
     bool allowNull = false,
     String? description,
     FieldDefinition? items,
-  }) => FieldDefinition._internal(
+  }) =>
+      FieldDefinition._internal(
         type: FieldType.array,
         required: required,
         allowNull: allowNull,
@@ -489,6 +497,7 @@ class TinyDBClient {
     Map<String, String?>? query,
     Object? body,
     R Function(dynamic data)? transform,
+    bool expectResponseBody = true,
   }) async {
     final uri = _buildUri(path, query);
     final request = http.Request(method, uri);
@@ -522,7 +531,7 @@ class TinyDBClient {
       throw _parseError(response);
     }
 
-    if (R == void || response.body.isEmpty) {
+    if (!expectResponseBody || response.body.isEmpty) {
       return (null as R);
     }
 
@@ -709,7 +718,8 @@ class CollectionClient<T extends Map<String, dynamic>> {
     return _metadata;
   }
 
-  Future<ListResult<T>> list({ListOptions options = const ListOptions()}) async {
+  Future<ListResult<T>> list(
+      {ListOptions options = const ListOptions()}) async {
     final response = await _client._request<Map<String, dynamic>>(
       method: 'GET',
       path: '/api/collections/${Uri.encodeComponent(name)}/documents',
@@ -763,7 +773,8 @@ class CollectionClient<T extends Map<String, dynamic>> {
   ) async {
     final response = await _client._request<Map<String, dynamic>>(
       method: 'PUT',
-      path: '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id)}',
+      path:
+          '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id)}',
       body: doc,
     );
     return _parseDocument<T>(response);
@@ -775,7 +786,8 @@ class CollectionClient<T extends Map<String, dynamic>> {
   ) async {
     final response = await _client._request<Map<String, dynamic>>(
       method: 'PATCH',
-      path: '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id)}',
+      path:
+          '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id)}',
       body: doc,
     );
     return _parseDocument<T>(response);
@@ -790,7 +802,9 @@ class CollectionClient<T extends Map<String, dynamic>> {
     }
     await _client._request<void>(
       method: 'DELETE',
-      path: '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id.toString())}',
+      path:
+          '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id.toString())}',
+      expectResponseBody: false,
     );
   }
 
@@ -803,8 +817,10 @@ class CollectionClient<T extends Map<String, dynamic>> {
     }
     await _client._request<void>(
       method: 'DELETE',
-      path: '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id.toString())}/purge',
+      path:
+          '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id.toString())}/purge',
       query: {'confirm': 'true'},
+      expectResponseBody: false,
     );
   }
 
@@ -833,8 +849,8 @@ class CollectionClient<T extends Map<String, dynamic>> {
         .map((item) => item as Map<String, dynamic>)
         .map((item) => SyncChange<T>(
               changeType: item['change_type'] as String,
-              document: _parseDocument<T>(
-                  item['document'] as Map<String, dynamic>),
+              document:
+                  _parseDocument<T>(item['document'] as Map<String, dynamic>),
             ))
         .toList(growable: false);
     return SyncResult<T>(
@@ -898,9 +914,8 @@ DocumentRecord<T> _parseDocument<T extends Map<String, dynamic>>(
     tenantId: payload['tenant_id'] as String,
     collectionId: payload['collection_id'] as String,
     key: payload['key'] as String,
-    keyNumeric: payload['key_numeric'] is num
-        ? payload['key_numeric'] as num
-        : null,
+    keyNumeric:
+        payload['key_numeric'] is num ? payload['key_numeric'] as num : null,
     data: Map<String, dynamic>.from(data) as T,
     createdAt: payload['created_at'] as String,
     updatedAt: payload['updated_at'] as String,

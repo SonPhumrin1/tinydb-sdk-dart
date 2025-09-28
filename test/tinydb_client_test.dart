@@ -11,8 +11,7 @@ void main() {
     'tenant_id': 'tenant-1',
     'name': 'users',
     'app_id': null,
-    'schema_json':
-        '{"fields":{"name":{"type":"string","required":true}}}',
+    'schema_json': '{"fields":{"name":{"type":"string","required":true}}}',
     'primary_key_field': 'uid',
     'primary_key_type': 'string',
     'primary_key_auto': false,
@@ -25,8 +24,7 @@ void main() {
     final requests = <http.Request>[];
     final mock = MockClient((request) async {
       requests.add(request);
-      if (request.method == 'POST' &&
-          request.url.path == '/api/collections') {
+      if (request.method == 'POST' && request.url.path == '/api/collections') {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         expect(body['name'], 'users');
         expect(body['schema'], isNotNull);
@@ -45,13 +43,17 @@ void main() {
       httpClient: mock,
     );
 
-    final collection = await client.collection<JsonMap>('users').schema(
-      CollectionSchemaDefinition(fields: {
-        'name': FieldDefinition.string(required: true),
-      }),
-    ).primaryKey(
-      const PrimaryKeyConfig(field: 'uid', type: PrimaryKeyType.string),
-    ).sync();
+    final collection = await client
+        .collection<JsonMap>('users')
+        .schema(
+          CollectionSchemaDefinition(fields: {
+            'name': FieldDefinition.string(required: true),
+          }),
+        )
+        .primaryKey(
+          const PrimaryKeyConfig(field: 'uid', type: PrimaryKeyType.string),
+        )
+        .sync();
 
     expect(collection.details.name, 'users');
     expect(collection.details.primaryKeyField, 'uid');
@@ -63,9 +65,9 @@ void main() {
     var callIndex = 0;
     final mock = MockClient((request) async {
       callIndex += 1;
-  if (callIndex == 1 &&
-      request.method == 'POST' &&
-      request.url.path == '/api/collections') {
+      if (callIndex == 1 &&
+          request.method == 'POST' &&
+          request.url.path == '/api/collections') {
         return http.Response(
           jsonEncode(baseCollectionResponse),
           200,

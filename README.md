@@ -23,33 +23,52 @@ import 'package:tinydb_client/tinydb_client.dart';
 
 Future<void> main() async {
   final db = TinyDBClient(
-    endpoint: 'https://api.tinydb.com',
+    endpoint: 'https://api.tinydb.com', // or Platform.environment['TINYDB_ENDPOINT']
     apiKey: 'your-api-key',
     appId: 'optional-app-id',
   );
 
-  final users = await db.collection('users').schema(
-    CollectionSchemaDefinition(fields: {
-      'name': FieldDefinition.string(required: true),
-      'email': FieldDefinition.string(),
-      'age': FieldDefinition.number(),
-    }),
-  ).primaryKey(
-    PrimaryKeyConfig(field: 'uid', type: PrimaryKeyType.uuid, auto: true),
-  ).sync();
+  final users = await db
+      .collection('users')
+      .schema(
+        CollectionSchemaDefinition(fields: {
+          'uid': FieldDefinition.string(required: true),
+          'name': FieldDefinition.string(required: true),
+          'email': FieldDefinition.string(),
+          'age': FieldDefinition.number(),
+        }),
+      )
+      .primaryKey(
+        const PrimaryKeyConfig(field: 'uid', type: PrimaryKeyType.string),
+      )
+      .sync();
 
   final created = await users.create({
+    'uid': 'user-${DateTime.now().millisecondsSinceEpoch}',
     'name': 'Alice',
     'email': 'alice@example.com',
     'age': 31,
   });
 
   final fetched = await users.get(created.id);
-  print(fetched.data);
+  print('Fetched user: ${fetched.data}');
 }
 ```
 
 See `example/main.dart` for a more complete walkthrough.
+
+### Run the example against a real API
+
+```bash
+export TINYDB_ENDPOINT="https://your-tinydb-host"
+export TINYDB_API_KEY="your-api-key"
+# export TINYDB_APP_ID="optional-app-id"
+# export TINYDB_COLLECTION="optional-collection-name"
+
+dart run example/main.dart
+```
+
+The script provisions the collection if needed, performs CRUD operations, runs a query, and cleans up the created document.
 
 ## License
 
