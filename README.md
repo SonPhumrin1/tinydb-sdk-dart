@@ -8,8 +8,10 @@ Add the local package to your project (until published to pub.dev):
 
 ```yaml
 dependencies:
-  tinydb_client:
-    path: ../sdk/dart
+    tinydb_client:
+        git:
+            url: https://github.com/cubetiqlabs/tinydb-sdk-dart.git
+            ref: main
 ```
 
 Then run `dart pub get`.
@@ -48,3 +50,7 @@ Future<void> main() async {
 ```
 
 See `example/main.dart` for a more complete walkthrough.
+
+## License
+
+MIT © CUBIS Labs
