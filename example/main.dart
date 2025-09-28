@@ -6,7 +6,8 @@ import 'package:tinydb_client/tinydb_client.dart';
 Future<void> main() async {
   final endpoint =
       Platform.environment['TINYDB_ENDPOINT'] ?? 'http://localhost:8080';
-  final apiKey = "584ad90972329e8d8ecabc5f3f18471746ed680dc148c307b926a75fade5ae07"; //Platform.environment['TINYDB_API_KEY'];
+  final apiKey =
+      "584ad90972329e8d8ecabc5f3f18471746ed680dc148c307b926a75fade5ae07"; //Platform.environment['TINYDB_API_KEY'];
   if (apiKey == null || apiKey.isEmpty) {
     stderr.writeln('Missing TINYDB_API_KEY environment variable.');
     stderr.writeln(
@@ -17,8 +18,7 @@ Future<void> main() async {
 
   final appIdRaw = Platform.environment['TINYDB_APP_ID'];
   final appId = (appIdRaw == null || appIdRaw.isEmpty) ? null : appIdRaw;
-  final collectionName =
-      Platform.environment['TINYDB_COLLECTION'] ?? 'dart_demo_users';
+  final collectionName = 'dart_demo_users';
 
   stdout.writeln('Connecting to $endpoint');
   stdout.writeln('Using collection: $collectionName');
@@ -30,48 +30,62 @@ Future<void> main() async {
   );
 
   try {
-    final collection = await client
-        .collection<JsonMap>(collectionName)
-        .schema(
-          CollectionSchemaDefinition(fields: {
-            'uid': FieldDefinition.string(required: true),
-            'name': FieldDefinition.string(required: true),
-            'email': FieldDefinition.string(),
-            'role': FieldDefinition.string(),
-            'age': FieldDefinition.number(),
-          }),
-        )
-        .primaryKey(
-          const PrimaryKeyConfig(field: 'uid', type: PrimaryKeyType.string),
-        )
-        .sync();
+    final uid = 'dart-${DateTime.now().microsecondsSinceEpoch}';
+    final syncResult = await client.syncCollections([
+      CollectionSyncEntry(
+        name: collectionName,
+        schema: CollectionSchemaDefinition(fields: {
+          'uid': FieldDefinition.string(required: true),
+          'name': FieldDefinition.string(required: true),
+          'email': FieldDefinition.string(),
+          'role': FieldDefinition.string(),
+          'age': FieldDefinition.number(),
+          'created_at': FieldDefinition.datetime(),
+        }),
+        primaryKey:
+            const PrimaryKeyConfig(field: 'uid', type: PrimaryKeyType.string),
+        records: [
+          {
+            'uid': uid,
+            'name': 'Dart SDK Tester',
+            'email': 'tester+$uid@example.com',
+            'role': 'QA Engineer',
+            'age': 29,
+            'created_at': DateTime.now().toUtc().toIso8601String(),
+          },
+          {
+            'uid': 'dart-2',
+            'name': 'Sambo Chea',
+            'email': 'sambo.chea@example.com',
+            'role': 'Software Engineer',
+            'age': 39,
+            'created_at': DateTime.now().toUtc().toIso8601String(),
+          }
+        ],
+      ),
+    ]);
 
+    for (final report in syncResult.reports) {
+      stdout.writeln(
+          'Synced collection ${report.name} -> ${report.status.name} (records: +${report.recordStats.created}/~${report.recordStats.updated})');
+      if (report.error != null) {
+        stdout.writeln('  warning: ${report.error}');
+      }
+    }
+
+    final collection = await client.collection<JsonMap>(collectionName).sync();
     stdout.writeln(
       'Collection ready (id=${collection.details.id}, primaryKey=${collection.details.primaryKeyField})',
     );
 
-    final uid = 'dart-${DateTime.now().microsecondsSinceEpoch}';
-    final created = await collection.create({
-      'uid': uid,
-      'name': 'Dart SDK Tester',
-      'email': 'tester+$uid@example.com',
-      'role': 'QA Engineer',
-      'age': 29,
-    });
-    stdout.writeln('Created document: ${jsonEncode(created.data)}');
-
-    final fetched = await collection.get(created.id);
+    final fetched = await collection.getByPrimaryKey(uid);
     stdout.writeln('Fetched document: ${jsonEncode(fetched.data)}');
 
-    final patched = await collection.patch(created.id, {
+    final patched = await collection.patch(fetched.id, {
       'role': 'Staff Engineer',
       'age': 30,
     });
     stdout.writeln('Patched document: ${jsonEncode(patched.data)}');
-
-    final listed = await collection.list();
-    stdout.writeln(
-        'Collection now has ${listed.items.length} document(s) in the first page.');
 
     final query = await collection.query({
       'where': {
@@ -88,12 +102,22 @@ Future<void> main() async {
     stdout.writeln(
         'Query returned ${query.items.length} document(s) for uid=$uid');
 
-    final syncResult = await collection.sync();
+    final syncChanges = await collection.sync();
     stdout.writeln(
-        'Sync returned ${syncResult.items.length} change(s) (pagination count: ${syncResult.pagination.count ?? 0}).');
+        'Sync returned ${syncChanges.items.length} change(s) (pagination count: ${syncChanges.pagination.count ?? 0}).');
 
-    await collection.delete(created.id);
-    stdout.writeln('Deleted document ${created.id}.');
+    await collection.delete(fetched.id);
+    stdout.writeln('Deleted document ${fetched.id}.');
+  } on CollectionSyncException catch (error) {
+    stderr.writeln('Collection sync failed: ${error.message}');
+    for (final report in error.result.reports) {
+      stderr.writeln(
+          '  ${report.name}: ${report.status} (records failed=${report.recordStats.failed})');
+      if (report.error != null) {
+        stderr.writeln('    ${report.error}');
+      }
+    }
+    exitCode = 1;
   } on TinyDBException catch (error) {
     stderr.writeln('TinyDB error (${error.status}): ${error.message}');
     if (error.details != null) {

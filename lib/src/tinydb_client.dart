@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:collection/collection.dart';
 import 'package:http/http.dart' as http;
 import 'package:meta/meta.dart';
 
@@ -286,6 +287,137 @@ class SyncResult<T extends Map<String, dynamic>> {
   });
 }
 
+enum RecordSyncMode { patch, update }
+
+extension RecordSyncModeValue on RecordSyncMode {
+  String get value => name;
+
+  static RecordSyncMode parse(String? value,
+      {RecordSyncMode fallback = RecordSyncMode.patch}) {
+    if (value == null) return fallback;
+    switch (value.toLowerCase().trim()) {
+      case 'update':
+        return RecordSyncMode.update;
+      case 'patch':
+        return RecordSyncMode.patch;
+      default:
+        return fallback;
+    }
+  }
+}
+
+@immutable
+class CollectionSyncEntry {
+  final String name;
+  final CollectionSchemaDefinition? schema;
+  final PrimaryKeyConfig? primaryKey;
+  final List<Map<String, dynamic>> records;
+  final RecordSyncMode? recordsMode;
+
+  const CollectionSyncEntry({
+    required this.name,
+    this.schema,
+    this.primaryKey,
+    this.records = const [],
+    this.recordsMode,
+  });
+}
+
+enum CollectionSyncStatus { created, updated, unchanged, skipped, failed }
+
+@immutable
+class RecordSyncStats {
+  final int created;
+  final int updated;
+  final int unchanged;
+  final int skipped;
+  final int failed;
+
+  const RecordSyncStats({
+    this.created = 0,
+    this.updated = 0,
+    this.unchanged = 0,
+    this.skipped = 0,
+    this.failed = 0,
+  });
+
+  int get total => created + updated + unchanged + skipped + failed;
+
+  RecordSyncStats add({
+    int created = 0,
+    int updated = 0,
+    int unchanged = 0,
+    int skipped = 0,
+    int failed = 0,
+  }) {
+    return RecordSyncStats(
+      created: this.created + created,
+      updated: this.updated + updated,
+      unchanged: this.unchanged + unchanged,
+      skipped: this.skipped + skipped,
+      failed: this.failed + failed,
+    );
+  }
+}
+
+@immutable
+class CollectionSyncReport {
+  final String name;
+  final CollectionSyncStatus status;
+  final RecordSyncStats recordStats;
+  final Object? error;
+
+  const CollectionSyncReport({
+    required this.name,
+    required this.status,
+    this.recordStats = const RecordSyncStats(),
+    this.error,
+  });
+}
+
+@immutable
+class CollectionSyncResult {
+  final List<CollectionSyncReport> reports;
+  final int created;
+  final int updated;
+  final int unchanged;
+  final int skipped;
+  final int failed;
+  final RecordSyncStats recordTotals;
+
+  const CollectionSyncResult({
+    required this.reports,
+    this.created = 0,
+    this.updated = 0,
+    this.unchanged = 0,
+    this.skipped = 0,
+    this.failed = 0,
+    this.recordTotals = const RecordSyncStats(),
+  });
+
+  bool get hasFailures => failed > 0 || recordTotals.failed > 0;
+}
+
+class CollectionSyncException implements Exception {
+  final String message;
+  final CollectionSyncResult result;
+
+  CollectionSyncException(this.message, this.result);
+
+  @override
+  String toString() => 'CollectionSyncException($message)';
+}
+
+class RecordSyncException implements Exception {
+  final String message;
+  final RecordSyncStats stats;
+
+  RecordSyncException(this.message, this.stats);
+
+  @override
+  String toString() => 'RecordSyncException($message)';
+}
+
 @immutable
 class CollectionDetails {
   final String id;
@@ -483,6 +615,169 @@ class TinyDBClient {
       }
       rethrow;
     }
+  }
+
+  Future<CollectionSyncResult> syncCollections(
+    List<CollectionSyncEntry> entries, {
+    RecordSyncMode defaultRecordMode = RecordSyncMode.patch,
+  }) async {
+    if (entries.isEmpty) {
+      throw ArgumentError('entries cannot be empty');
+    }
+
+    final reports = <CollectionSyncReport>[];
+    var created = 0;
+    var updated = 0;
+    var unchanged = 0;
+    var skipped = 0;
+    var failed = 0;
+    var recordTotals = const RecordSyncStats();
+    const equality = DeepCollectionEquality();
+
+    for (final entry in entries) {
+      final trimmedName = entry.name.trim();
+      if (trimmedName.isEmpty) {
+        skipped++;
+        reports.add(
+          CollectionSyncReport(
+            name: entry.name,
+            status: CollectionSyncStatus.skipped,
+            error: ArgumentError('collection name cannot be empty'),
+          ),
+        );
+        continue;
+      }
+
+      var existed = true;
+      CollectionDetails? before;
+      try {
+        before = await describeCollection(trimmedName);
+      } on TinyDBException catch (error) {
+        if (error.status == 404) {
+          existed = false;
+        } else {
+          failed++;
+          reports.add(
+            CollectionSyncReport(
+              name: trimmedName,
+              status: CollectionSyncStatus.failed,
+              error: error,
+            ),
+          );
+          continue;
+        }
+      }
+
+      CollectionBuilder<JsonMap> builder = collection<JsonMap>(trimmedName);
+      if (entry.schema != null) {
+        builder = builder.schema(entry.schema!);
+      }
+      if (entry.primaryKey != null) {
+        builder = builder.primaryKey(entry.primaryKey!);
+      }
+
+      CollectionClient<JsonMap> collectionClient;
+      try {
+        collectionClient = await builder.sync();
+      } on TinyDBException catch (error) {
+        failed++;
+        reports.add(
+          CollectionSyncReport(
+            name: trimmedName,
+            status: CollectionSyncStatus.failed,
+            error: error,
+          ),
+        );
+        continue;
+      }
+
+      final schemaChanged =
+          _schemaDefinitionChanged(entry.schema, before, equality);
+      final pkChanged = _primaryKeyConfigChanged(entry.primaryKey, before);
+
+      var status = CollectionSyncStatus.unchanged;
+      if (!existed) {
+        status = CollectionSyncStatus.created;
+      } else if (schemaChanged || pkChanged) {
+        status = CollectionSyncStatus.updated;
+      }
+
+      RecordSyncStats recordStats = const RecordSyncStats();
+      Object? statusError;
+      final records = entry.records;
+      final mode = entry.recordsMode ?? defaultRecordMode;
+      if (records.isNotEmpty) {
+        try {
+          recordStats = await _syncCollectionRecords(
+            collectionClient,
+            records,
+            mode,
+            equality,
+          );
+        } on RecordSyncException catch (error) {
+          recordStats = error.stats;
+          statusError = error;
+          status = CollectionSyncStatus.failed;
+        } on TinyDBException catch (error) {
+          statusError = error;
+          status = CollectionSyncStatus.failed;
+        }
+      }
+
+      recordTotals = recordTotals.add(
+        created: recordStats.created,
+        updated: recordStats.updated,
+        unchanged: recordStats.unchanged,
+        skipped: recordStats.skipped,
+        failed: recordStats.failed,
+      );
+
+      switch (status) {
+        case CollectionSyncStatus.created:
+          created++;
+          break;
+        case CollectionSyncStatus.updated:
+          updated++;
+          break;
+        case CollectionSyncStatus.unchanged:
+          unchanged++;
+          break;
+        case CollectionSyncStatus.skipped:
+          skipped++;
+          break;
+        case CollectionSyncStatus.failed:
+          failed++;
+          break;
+      }
+
+      reports.add(
+        CollectionSyncReport(
+          name: trimmedName,
+          status: status,
+          recordStats: recordStats,
+          error: statusError,
+        ),
+      );
+    }
+
+    final result = CollectionSyncResult(
+      reports: reports,
+      created: created,
+      updated: updated,
+      unchanged: unchanged,
+      skipped: skipped,
+      failed: failed,
+      recordTotals: recordTotals,
+    );
+
+    if (result.hasFailures) {
+      throw CollectionSyncException(
+        'Failed to sync ${result.failed + result.recordTotals.failed} collection or record operation(s)',
+        result,
+      );
+    }
+
+    return result;
   }
 
   Future<void> close() async {
@@ -921,4 +1216,220 @@ DocumentRecord<T> _parseDocument<T extends Map<String, dynamic>>(
     updatedAt: payload['updated_at'] as String,
     deletedAt: payload['deleted_at'] as String?,
   );
+}
+
+bool _schemaDefinitionChanged(
+  CollectionSchemaDefinition? desired,
+  CollectionDetails? existing,
+  DeepCollectionEquality equality,
+) {
+  if (desired == null) {
+    return false;
+  }
+  final desiredMap = desired.toJson();
+  final existingMap = existing?.schema;
+  if (existingMap == null) {
+    return desiredMap.isNotEmpty;
+  }
+  return !equality.equals(existingMap, desiredMap);
+}
+
+bool _primaryKeyConfigChanged(
+    PrimaryKeyConfig? desired, CollectionDetails? existing) {
+  if (desired == null || existing == null) {
+    return false;
+  }
+  final desiredField = desired.field?.trim();
+  final desiredType = desired.type?.value.trimmedLower();
+  final existingField = existing.primaryKeyField?.trim();
+  final existingType = existing.primaryKeyType?.trim();
+
+  if (desiredField != null && desiredField.isNotEmpty) {
+    if ((existingField ?? '').trim().toLowerCase() !=
+        desiredField.toLowerCase()) {
+      return true;
+    }
+  }
+
+  if (desiredType != null && desiredType.isNotEmpty) {
+    if ((existingType ?? '').trim().toLowerCase() != desiredType) {
+      return true;
+    }
+  }
+
+  if (desired.auto != null && desired.auto != existing.primaryKeyAuto) {
+    return true;
+  }
+
+  return false;
+}
+
+extension _TinyDBStringExtensions on String {
+  String trimmedLower() => trim().toLowerCase();
+}
+
+Future<RecordSyncStats> _syncCollectionRecords(
+  CollectionClient<JsonMap> collection,
+  List<Map<String, dynamic>> rawRecords,
+  RecordSyncMode mode,
+  DeepCollectionEquality equality,
+) async {
+  var stats = const RecordSyncStats();
+  if (rawRecords.isEmpty) {
+    return stats;
+  }
+
+  final keepPrimary = mode == RecordSyncMode.update;
+  final pkField = _resolvePrimaryKeyField(collection.details);
+
+  for (var index = 0; index < rawRecords.length; index++) {
+    final record = Map<String, dynamic>.from(rawRecords[index]);
+    final key = _extractDocumentKey(record, pkField);
+    if (key == null || key.isEmpty) {
+      stats = stats.add(skipped: 1);
+      continue;
+    }
+
+    DocumentRecord<JsonMap>? existing;
+    try {
+      existing = await collection.getByPrimaryKey(key);
+    } on TinyDBException catch (error) {
+      if (error.status != 404) {
+        stats = stats.add(failed: 1);
+        continue;
+      }
+    }
+
+    if (existing == null) {
+      final payload = _prepareRecordCreatePayload(record);
+      if (payload.isEmpty) {
+        stats = stats.add(skipped: 1);
+        continue;
+      }
+      try {
+        await collection.create(payload);
+        stats = stats.add(created: 1);
+      } on TinyDBException {
+        stats = stats.add(failed: 1);
+      }
+      continue;
+    }
+
+    final payload = _prepareRecordSyncPayload(record, pkField, keepPrimary);
+    if (payload.isEmpty) {
+      stats = stats.add(skipped: 1);
+      continue;
+    }
+
+    if (_shouldSkipRecord(
+        existing.data, payload, pkField, keepPrimary, equality, mode)) {
+      stats = stats.add(unchanged: 1);
+      continue;
+    }
+
+    try {
+      if (mode == RecordSyncMode.update) {
+        await collection.update(existing.id, payload);
+      } else {
+        await collection.patch(existing.id, payload);
+      }
+      stats = stats.add(updated: 1);
+    } on TinyDBException {
+      stats = stats.add(failed: 1);
+    }
+  }
+
+  if (stats.failed > 0) {
+    throw RecordSyncException(
+      'Failed to sync ${stats.failed} record(s) for collection ${collection.name}',
+      stats,
+    );
+  }
+
+  return stats;
+}
+
+String _resolvePrimaryKeyField(CollectionDetails details) {
+  final field = details.primaryKeyField?.trim();
+  if (field == null || field.isEmpty) {
+    return 'id';
+  }
+  return field;
+}
+
+String? _extractDocumentKey(Map<String, dynamic> record, String pkField) {
+  final value = record[pkField];
+  if (value == null) {
+    return null;
+  }
+  final key = value.toString().trim();
+  return key.isEmpty ? null : key;
+}
+
+Map<String, dynamic> _prepareRecordCreatePayload(Map<String, dynamic> record) {
+  final payload = <String, dynamic>{};
+  record.forEach((key, value) {
+    if (key == '_doc_id') {
+      return;
+    }
+    payload[key] = value;
+  });
+  return payload;
+}
+
+Map<String, dynamic> _prepareRecordSyncPayload(
+  Map<String, dynamic> record,
+  String pkField,
+  bool keepPrimary,
+) {
+  final payload = <String, dynamic>{};
+  record.forEach((key, value) {
+    if (key == '_doc_id') {
+      return;
+    }
+    if (!keepPrimary && key == pkField) {
+      return;
+    }
+    payload[key] = value;
+  });
+  return payload;
+}
+
+Map<String, dynamic> _sanitizeExistingRecord(
+  Map<String, dynamic> existing,
+  String pkField,
+  bool keepPrimary,
+) {
+  final sanitized = <String, dynamic>{};
+  existing.forEach((key, value) {
+    if (key == '_doc_id') {
+      return;
+    }
+    if (!keepPrimary && key == pkField) {
+      return;
+    }
+    sanitized[key] = value;
+  });
+  return sanitized;
+}
+
+bool _shouldSkipRecord(
+  Map<String, dynamic> existing,
+  Map<String, dynamic> payload,
+  String pkField,
+  bool keepPrimary,
+  DeepCollectionEquality equality,
+  RecordSyncMode mode,
+) {
+  final sanitizedExisting =
+      _sanitizeExistingRecord(existing, pkField, keepPrimary);
+  if (mode == RecordSyncMode.patch) {
+    for (final entry in payload.entries) {
+      if (!equality.equals(sanitizedExisting[entry.key], entry.value)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return equality.equals(sanitizedExisting, payload);
 }

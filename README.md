@@ -57,13 +57,41 @@ Future<void> main() async {
 
 See `example/main.dart` for a more complete walkthrough.
 
+### Sync collections and documents together
+
+```dart
+final result = await db.syncCollections([
+  CollectionSyncEntry(
+    name: 'users',
+    schema: CollectionSchemaDefinition(fields: {
+      'uid': FieldDefinition.string(required: true),
+      'name': FieldDefinition.string(required: true),
+      'email': FieldDefinition.string(),
+    }),
+    primaryKey: const PrimaryKeyConfig(
+      field: 'uid',
+      type: PrimaryKeyType.string,
+    ),
+    records: const [
+      {'uid': 'user-1', 'name': 'Alice', 'email': 'alice@example.com'},
+      {'uid': 'user-2', 'name': 'Bob'},
+    ],
+  ),
+]);
+
+for (final report in result.reports) {
+  print('${report.name}: ${report.status.name} (records created=${report.recordStats.created})');
+}
+```
+
+Provide one or more `CollectionSyncEntry` items. Each entry provisions the collection schema (creating or updating as needed) and synchronizes the `records` array using the collection's primary key. By default documents are patched (`RecordSyncMode.patch`); pass `recordsMode: RecordSyncMode.update` to perform full replacements.
+
 ### Run the example against a real API
 
 ```bash
 export TINYDB_ENDPOINT="https://your-tinydb-host"
 export TINYDB_API_KEY="your-api-key"
 # export TINYDB_APP_ID="optional-app-id"
-# export TINYDB_COLLECTION="optional-collection-name"
 
 dart run example/main.dart
 ```

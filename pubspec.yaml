@@ -10,6 +10,7 @@ environment:
 dependencies:
   http: ^1.2.0
   meta: ^1.10.0
+  collection: ^1.18.0
 
 dev_dependencies:
   lints: ^3.0.0
