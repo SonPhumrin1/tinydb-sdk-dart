@@ -700,6 +700,69 @@ class CollectionDetails {
 }
 
 @immutable
+class AuthProfile {
+  final String? tenantId;
+  final String? tenantName;
+  final String? appId;
+  final String? appName;
+  final String? status;
+  final String? keyPrefix;
+  final DateTime? createdAt;
+  final DateTime? lastUsed;
+
+  const AuthProfile({
+    this.tenantId,
+    this.tenantName,
+    this.appId,
+    this.appName,
+    this.status,
+    this.keyPrefix,
+    this.createdAt,
+    this.lastUsed,
+  });
+
+  factory AuthProfile.fromJson(Map<String, dynamic> json) {
+    return AuthProfile(
+      tenantId: json['tenant_id'] as String?,
+      tenantName: json['tenant_name'] as String?,
+      appId: json['app_id'] as String?,
+      appName: json['app_name'] as String?,
+      status: json['status'] as String?,
+      keyPrefix: json['key_prefix'] as String?,
+      createdAt: _parseDate(json['created_at']),
+      lastUsed: _parseDate(json['last_used']),
+    );
+  }
+
+  static DateTime? _parseDate(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) {
+      return value.toUtc();
+    }
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
+    }
+    if (value is String && value.isNotEmpty) {
+      return DateTime.tryParse(value)?.toUtc();
+    }
+    return null;
+  }
+
+  JsonMap toJson() {
+    return {
+      if (tenantId != null) 'tenant_id': tenantId,
+      if (tenantName != null) 'tenant_name': tenantName,
+      if (appId != null) 'app_id': appId,
+      if (appName != null) 'app_name': appName,
+      if (status != null) 'status': status,
+      if (keyPrefix != null) 'key_prefix': keyPrefix,
+      if (createdAt != null) 'created_at': createdAt!.toUtc().toIso8601String(),
+      if (lastUsed != null) 'last_used': lastUsed!.toUtc().toIso8601String(),
+    };
+  }
+}
+
+@immutable
 class DocumentRecord<T extends Map<String, dynamic>> {
   final String id;
   final String tenantId;
@@ -798,6 +861,15 @@ class TinyDBClient {
       );
     });
     return match;
+  }
+
+  /// Fetches the authentication profile associated with the configured API key.
+  Future<AuthProfile> me() async {
+    final response = await _request<Map<String, dynamic>>(
+      method: 'GET',
+      path: '/api/me',
+    );
+    return AuthProfile.fromJson(response);
   }
 
   Future<CollectionDetails> ensureCollection({
@@ -1327,13 +1399,15 @@ class CollectionClient<T extends Map<String, dynamic>> {
     return _parseDocument<T>(response);
   }
 
-  Future<List<DocumentRecord<T>>> createMany(
-    List<Map<String, dynamic>> docs,
-  ) async {
+  Future<List<DocumentRecord<T>>> createMany(List<Map<String, dynamic>> docs,
+      {bool?
+          sync} // whether to sync the records upon creation (if pk exists, they will be updated instead)
+      ) async {
     if (docs.isEmpty) return const [];
     final response = await _client._request<Map<String, dynamic>>(
       method: 'POST',
-      path: '/api/collections/${Uri.encodeComponent(name)}/documents/bulk',
+      path:
+          '/api/collections/${Uri.encodeComponent(name)}/documents/bulk?sync=${sync == true ? 'true' : 'false'}',
       body: docs,
     );
     return (response['items'] as List<dynamic>? ?? [])

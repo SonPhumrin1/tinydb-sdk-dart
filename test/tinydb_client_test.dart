@@ -24,6 +24,53 @@ void main() {
     'deleted_at': null
   };
 
+    group('me endpoint', () {
+      test('fetches current auth profile', () async {
+        http.Request? captured;
+        final mock = MockClient((request) async {
+          captured = request;
+          expect(request.method, 'GET');
+          expect(request.url.path, '/api/me');
+          return http.Response(
+            jsonEncode({
+              'tenant_id': 'tenant-1',
+              'tenant_name': 'Acme Corp',
+              'app_id': 'app-7',
+              'app_name': 'Console',
+              'status': 'ok',
+              'key_prefix': 'abc123',
+              'created_at': '2024-01-01T00:00:00Z',
+              'last_used': '2024-01-02T12:34:56Z',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        });
+
+        final client = TinyDBClient(
+          endpoint: 'https://db.example.com',
+          apiKey: 'demo-key',
+          appId: 'app-7',
+          httpClient: mock,
+        );
+
+        final profile = await client.me();
+
+        expect(profile.tenantId, 'tenant-1');
+        expect(profile.tenantName, 'Acme Corp');
+        expect(profile.appId, 'app-7');
+        expect(profile.appName, 'Console');
+        expect(profile.status, 'ok');
+        expect(profile.keyPrefix, 'abc123');
+        expect(profile.createdAt, DateTime.parse('2024-01-01T00:00:00Z'));
+        expect(profile.lastUsed, DateTime.parse('2024-01-02T12:34:56Z'));
+        expect(captured?.headers['X-API-Key'], 'demo-key');
+        expect(captured?.headers['X-App-ID'], 'app-7');
+
+        await client.close();
+      });
+    });
+
   group('syncCollections', () {
     test('creates collection and records when missing', () async {
       final mock = MockClient((request) async {
