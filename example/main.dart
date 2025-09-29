@@ -6,15 +6,15 @@ import 'package:tinydb_client/tinydb_client.dart';
 Future<void> main() async {
   final endpoint =
       Platform.environment['TINYDB_ENDPOINT'] ?? 'http://localhost:8080';
-  final apiKey =
-      "584ad90972329e8d8ecabc5f3f18471746ed680dc148c307b926a75fade5ae07"; //Platform.environment['TINYDB_API_KEY'];
-  if (apiKey == null || apiKey.isEmpty) {
+  final envApiKey = Platform.environment['TINYDB_API_KEY'];
+  if (envApiKey == null || envApiKey.isEmpty) {
     stderr.writeln('Missing TINYDB_API_KEY environment variable.');
     stderr.writeln(
         'Export TINYDB_API_KEY (and optionally TINYDB_ENDPOINT, TINYDB_APP_ID, TINYDB_COLLECTION) before running.');
     exitCode = 64; // EX_USAGE
     return;
   }
+  final apiKey = envApiKey;
 
   final appIdRaw = Platform.environment['TINYDB_APP_ID'];
   final appId = (appIdRaw == null || appIdRaw.isEmpty) ? null : appIdRaw;
@@ -78,14 +78,27 @@ Future<void> main() async {
       'Collection ready (id=${collection.details.id}, primaryKey=${collection.details.primaryKeyField})',
     );
 
+    final extraUid = '${uid}_companion';
+    final docStats = await collection.syncDocuments([
+      {
+        'uid': uid,
+        'role': 'Staff Engineer',
+        'age': 30,
+        'skills': ['Dart', 'Go'],
+      },
+      {
+        'uid': extraUid,
+        'name': 'Dart SDK Companion',
+        'role': 'Developer Advocate',
+      },
+    ]);
+    stdout.writeln(
+        'Document sync stats: created=${docStats.created} updated=${docStats.updated} skipped=${docStats.skipped} failed=${docStats.failed}');
+
     final fetched = await collection.getByPrimaryKey(uid);
     stdout.writeln('Fetched document: ${jsonEncode(fetched.data)}');
-
-    final patched = await collection.patch(fetched.id, {
-      'role': 'Staff Engineer',
-      'age': 30,
-    });
-    stdout.writeln('Patched document: ${jsonEncode(patched.data)}');
+    final companion = await collection.getByPrimaryKey(extraUid);
+    stdout.writeln('Companion document: ${jsonEncode(companion.data)}');
 
     final query = await collection.query({
       'where': {
@@ -106,8 +119,8 @@ Future<void> main() async {
     stdout.writeln(
         'Sync returned ${syncChanges.items.length} change(s) (pagination count: ${syncChanges.pagination.count ?? 0}).');
 
-    await collection.delete(fetched.id);
-    stdout.writeln('Deleted document ${fetched.id}.');
+    await collection.delete([fetched.id, companion.id]);
+    stdout.writeln('Deleted documents ${fetched.id} and ${companion.id}.');
   } on CollectionSyncException catch (error) {
     stderr.writeln('Collection sync failed: ${error.message}');
     for (final report in error.result.reports) {

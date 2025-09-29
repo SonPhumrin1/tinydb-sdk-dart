@@ -86,6 +86,24 @@ for (final report in result.reports) {
 
 Provide one or more `CollectionSyncEntry` items. Each entry provisions the collection schema (creating or updating as needed) and synchronizes the `records` array using the collection's primary key. By default documents are patched (`RecordSyncMode.patch`); pass `recordsMode: RecordSyncMode.update` to perform full replacements.
 
+### Sync documents on an existing collection
+
+```dart
+final users = await db.collection<JsonMap>('users').sync();
+final stats = await users.syncDocuments([
+  {'uid': 'user-1', 'name': 'Alice'},
+  {'uid': 'user-2', 'name': 'Bob', 'role': 'DevOps'},
+]);
+
+if (stats.failed > 0) {
+  throw RecordSyncException('document sync failed', stats);
+}
+
+print('Created ${stats.created}, updated ${stats.updated}, skipped ${stats.skipped} records');
+```
+
+`syncDocuments` mirrors the CLI's record import behaviour: it looks up each document by primary key, creates it if missing, otherwise patches (or updates) the mutable fields while preserving data integrity.
+
 ### Run the example against a real API
 
 ```bash

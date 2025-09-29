@@ -1119,6 +1119,14 @@ class CollectionClient<T extends Map<String, dynamic>> {
     );
   }
 
+  Future<RecordSyncStats> syncDocuments(
+    List<Map<String, dynamic>> records, {
+    RecordSyncMode mode = RecordSyncMode.patch,
+  }) async {
+    const equality = DeepCollectionEquality();
+    return _syncCollectionRecords<T>(this, records, mode, equality);
+  }
+
   Future<QueryResult<T>> query(Map<String, dynamic> request) async {
     final response = await _client._request<Map<String, dynamic>>(
       method: 'POST',
@@ -1268,8 +1276,8 @@ extension _TinyDBStringExtensions on String {
   String trimmedLower() => trim().toLowerCase();
 }
 
-Future<RecordSyncStats> _syncCollectionRecords(
-  CollectionClient<JsonMap> collection,
+Future<RecordSyncStats> _syncCollectionRecords<T extends Map<String, dynamic>>(
+  CollectionClient<T> collection,
   List<Map<String, dynamic>> rawRecords,
   RecordSyncMode mode,
   DeepCollectionEquality equality,
@@ -1290,7 +1298,7 @@ Future<RecordSyncStats> _syncCollectionRecords(
       continue;
     }
 
-    DocumentRecord<JsonMap>? existing;
+    DocumentRecord<T>? existing;
     try {
       existing = await collection.getByPrimaryKey(key);
     } on TinyDBException catch (error) {
@@ -1321,8 +1329,9 @@ Future<RecordSyncStats> _syncCollectionRecords(
       continue;
     }
 
+    final existingData = Map<String, dynamic>.from(existing.data);
     if (_shouldSkipRecord(
-        existing.data, payload, pkField, keepPrimary, equality, mode)) {
+        existingData, payload, pkField, keepPrimary, equality, mode)) {
       stats = stats.add(unchanged: 1);
       continue;
     }

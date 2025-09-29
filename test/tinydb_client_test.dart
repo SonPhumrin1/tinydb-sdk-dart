@@ -23,6 +23,26 @@ void main() {
   group('syncCollections', () {
     test('creates collection and records when missing', () async {
       final mock = MockClient((request) async {
+        if (request.method == 'POST' &&
+            request.url.path == '/api/collections') {
+          return http.Response(
+            jsonEncode({
+              'id': 'users',
+              'tenant_id': 'tenant-1',
+              'name': 'users',
+              'app_id': null,
+              'schema_json': '{}',
+              'primary_key_field': 'uid',
+              'primary_key_type': 'string',
+              'primary_key_auto': false,
+              'created_at': '2024-01-01T00:00:00Z',
+              'updated_at': '2024-01-01T00:00:00Z',
+              'deleted_at': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
         if (request.method == 'GET' && request.url.path == '/api/collections') {
           return http.Response('[]', 200,
               headers: {'content-type': 'application/json'});
@@ -126,6 +146,26 @@ void main() {
 
       var collectionsCalls = 0;
       final mock = MockClient((request) async {
+        if (request.method == 'POST' &&
+            request.url.path == '/api/collections') {
+          return http.Response(
+            jsonEncode({
+              'id': 'users',
+              'tenant_id': 'tenant-1',
+              'name': 'users',
+              'app_id': null,
+              'schema_json': '{}',
+              'primary_key_field': 'uid',
+              'primary_key_type': 'string',
+              'primary_key_auto': false,
+              'created_at': '2024-01-01T00:00:00Z',
+              'updated_at': '2024-01-01T00:00:00Z',
+              'deleted_at': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
         if (request.method == 'GET' && request.url.path == '/api/collections') {
           collectionsCalls += 1;
           return http.Response(
@@ -216,6 +256,26 @@ void main() {
 
     test('throws when record sync fails', () async {
       final mock = MockClient((request) async {
+        if (request.method == 'POST' &&
+            request.url.path == '/api/collections') {
+          return http.Response(
+            jsonEncode({
+              'id': 'users',
+              'tenant_id': 'tenant-1',
+              'name': 'users',
+              'app_id': null,
+              'schema_json': '{}',
+              'primary_key_field': 'uid',
+              'primary_key_type': 'string',
+              'primary_key_auto': false,
+              'created_at': '2024-01-01T00:00:00Z',
+              'updated_at': '2024-01-01T00:00:00Z',
+              'deleted_at': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
         if (request.method == 'GET' && request.url.path == '/api/collections') {
           return http.Response('[]', 200,
               headers: {'content-type': 'application/json'});
@@ -367,5 +427,273 @@ void main() {
     expect(created.id, 'doc-1');
     expect(created.data['name'], 'Alice');
     expect(created.data['_doc_id'], 'doc-1');
+  });
+
+  group('CollectionClient.syncDocuments', () {
+    test('creates missing documents', () async {
+      final mock = MockClient((request) async {
+        if (request.method == 'POST' &&
+            request.url.path == '/api/collections') {
+          return http.Response(
+            jsonEncode({
+              'id': 'users',
+              'tenant_id': 'tenant-1',
+              'name': 'users',
+              'app_id': null,
+              'schema_json': '{}',
+              'primary_key_field': 'uid',
+              'primary_key_type': 'string',
+              'primary_key_auto': false,
+              'created_at': '2024-01-01T00:00:00Z',
+              'updated_at': '2024-01-01T00:00:00Z',
+              'deleted_at': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'GET' && request.url.path == '/api/collections') {
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'users',
+                'tenant_id': 'tenant-1',
+                'name': 'users',
+                'app_id': null,
+                'schema_json': '{}',
+                'primary_key_field': 'uid',
+                'primary_key_type': 'string',
+                'primary_key_auto': false,
+                'created_at': '2024-01-01T00:00:00Z',
+                'updated_at': '2024-01-01T00:00:00Z',
+                'deleted_at': null,
+              }
+            ]),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'GET' &&
+            request.url.path ==
+                '/api/collections/users/documents/primary/user-1') {
+          return http.Response('not found', 404);
+        }
+        if (request.method == 'POST' &&
+            request.url.path == '/api/collections/users/documents') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['uid'], 'user-1');
+          return http.Response(
+            jsonEncode({
+              'id': 'doc-1',
+              'tenant_id': 'tenant-1',
+              'collection_id': 'users',
+              'key': 'user-1',
+              'key_numeric': null,
+              'data': body,
+              'created_at': '2024-01-01T00:00:00Z',
+              'updated_at': '2024-01-01T00:00:00Z',
+              'deleted_at': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        fail('Unexpected request: ${request.method} ${request.url.path}');
+      });
+
+      final client = TinyDBClient(
+        endpoint: 'https://db.example.com',
+        apiKey: 'demo-key',
+        httpClient: mock,
+      );
+
+      final collection = await client.collection<JsonMap>('users').sync();
+      final stats = await collection.syncDocuments([
+        {'uid': 'user-1', 'name': 'Alice'},
+      ]);
+
+      expect(stats.created, 1);
+      expect(stats.failed, 0);
+      expect(stats.unchanged, 0);
+    });
+
+    test('patches existing documents by default', () async {
+      final mock = MockClient((request) async {
+        if (request.method == 'POST' &&
+            request.url.path == '/api/collections') {
+          return http.Response(
+            jsonEncode({
+              'id': 'users',
+              'tenant_id': 'tenant-1',
+              'name': 'users',
+              'app_id': null,
+              'schema_json': '{}',
+              'primary_key_field': 'uid',
+              'primary_key_type': 'string',
+              'primary_key_auto': false,
+              'created_at': '2024-01-01T00:00:00Z',
+              'updated_at': '2024-01-01T00:00:00Z',
+              'deleted_at': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'GET' && request.url.path == '/api/collections') {
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'users',
+                'tenant_id': 'tenant-1',
+                'name': 'users',
+                'app_id': null,
+                'schema_json': '{}',
+                'primary_key_field': 'uid',
+                'primary_key_type': 'string',
+                'primary_key_auto': false,
+                'created_at': '2024-01-01T00:00:00Z',
+                'updated_at': '2024-01-01T00:00:00Z',
+                'deleted_at': null,
+              }
+            ]),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'GET' &&
+            request.url.path ==
+                '/api/collections/users/documents/primary/user-1') {
+          return http.Response(
+            jsonEncode({
+              'id': 'doc-1',
+              'tenant_id': 'tenant-1',
+              'collection_id': 'users',
+              'key': 'user-1',
+              'key_numeric': null,
+              'data': {
+                'uid': 'user-1',
+                'name': 'Alice',
+                'role': 'Engineer',
+              },
+              'created_at': '2024-01-01T00:00:00Z',
+              'updated_at': '2024-01-01T00:00:00Z',
+              'deleted_at': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'PATCH' &&
+            request.url.path == '/api/collections/users/documents/doc-1') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body.containsKey('uid'), isFalse);
+          expect(body['role'], 'Staff Engineer');
+          return http.Response(
+            jsonEncode({
+              'id': 'doc-1',
+              'tenant_id': 'tenant-1',
+              'collection_id': 'users',
+              'key': 'user-1',
+              'key_numeric': null,
+              'data': {
+                'uid': 'user-1',
+                'name': 'Alice',
+                'role': 'Staff Engineer',
+              },
+              'created_at': '2024-01-01T00:00:00Z',
+              'updated_at': '2024-01-02T00:00:00Z',
+              'deleted_at': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        fail('Unexpected request: ${request.method} ${request.url.path}');
+      });
+
+      final client = TinyDBClient(
+        endpoint: 'https://db.example.com',
+        apiKey: 'demo-key',
+        httpClient: mock,
+      );
+      final collection = await client.collection<JsonMap>('users').sync();
+
+      final stats = await collection.syncDocuments([
+        {'uid': 'user-1', 'role': 'Staff Engineer'},
+      ]);
+
+      expect(stats.updated, 1);
+      expect(stats.unchanged, 0);
+    });
+
+    test('throws RecordSyncException when sync fails', () async {
+      final mock = MockClient((request) async {
+        if (request.method == 'POST' &&
+            request.url.path == '/api/collections') {
+          return http.Response(
+            jsonEncode({
+              'id': 'users',
+              'tenant_id': 'tenant-1',
+              'name': 'users',
+              'app_id': null,
+              'schema_json': '{}',
+              'primary_key_field': 'uid',
+              'primary_key_type': 'string',
+              'primary_key_auto': false,
+              'created_at': '2024-01-01T00:00:00Z',
+              'updated_at': '2024-01-01T00:00:00Z',
+              'deleted_at': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'GET' && request.url.path == '/api/collections') {
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'users',
+                'tenant_id': 'tenant-1',
+                'name': 'users',
+                'app_id': null,
+                'schema_json': '{}',
+                'primary_key_field': 'uid',
+                'primary_key_type': 'string',
+                'primary_key_auto': false,
+                'created_at': '2024-01-01T00:00:00Z',
+                'updated_at': '2024-01-01T00:00:00Z',
+                'deleted_at': null,
+              }
+            ]),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'GET' &&
+            request.url.path ==
+                '/api/collections/users/documents/primary/user-1') {
+          return http.Response('not found', 404);
+        }
+        if (request.method == 'POST' &&
+            request.url.path == '/api/collections/users/documents') {
+          return http.Response('oops', 500);
+        }
+        fail('Unexpected request: ${request.method} ${request.url.path}');
+      });
+
+      final client = TinyDBClient(
+        endpoint: 'https://db.example.com',
+        apiKey: 'demo-key',
+        httpClient: mock,
+      );
+      final collection = await client.collection<JsonMap>('users').sync();
+
+      expect(
+        () => collection.syncDocuments([
+          {'uid': 'user-1', 'name': 'Alice'},
+        ]),
+        throwsA(isA<RecordSyncException>()),
+      );
+    });
   });
 }
