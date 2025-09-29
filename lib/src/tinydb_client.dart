@@ -1770,24 +1770,14 @@ class CollectionClient<T extends Map<String, dynamic>> {
 
     Future<void> closeController({bool notifyProgress = true}) async {
       if (closing) {
-        // ignore: avoid_print
-        print('closeController: already closing');
         return;
       }
       closing = true;
       try {
-        // ignore: avoid_print
-        print('closeController: cancel subscription start');
         await subscription?.cancel();
-        // ignore: avoid_print
-        print('closeController: cancel subscription complete');
       } catch (_) {}
       try {
-        // ignore: avoid_print
-        print('closeController: sink close start');
         await channel?.sink.close();
-        // ignore: avoid_print
-        print('closeController: sink close complete');
       } catch (_) {}
       if (notifyProgress) {
         onProgress?.call(QueryProgress(
@@ -1798,11 +1788,7 @@ class CollectionClient<T extends Map<String, dynamic>> {
         ));
       }
       if (!controller.isClosed) {
-        // ignore: avoid_print
-        print('closeController: controller close start');
         await controller.close();
-        // ignore: avoid_print
-        print('closeController: controller close complete');
       }
     }
 
