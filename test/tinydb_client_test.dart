@@ -1955,10 +1955,18 @@ class TestWebSocketChannel with StreamChannelMixin implements WebSocketChannel {
         _listenCompleter.complete();
       }
     });
-    _sink = _TestWebSocketSink(_outgoing, (code, reason) {
-      _closeCode = code;
-      _closeReason = reason;
-    });
+    _sink = _TestWebSocketSink(
+      _outgoing,
+      (code, reason) {
+        _closeCode = code;
+        _closeReason = reason;
+      },
+      onClosed: () async {
+        if (!_incoming.isClosed) {
+          await _incoming.close();
+        }
+      },
+    );
     _readyCompleter.complete();
   }
 
@@ -2011,14 +2019,17 @@ class TestWebSocketChannel with StreamChannelMixin implements WebSocketChannel {
 class _TestWebSocketSink implements WebSocketSink {
   _TestWebSocketSink(
     StreamController<dynamic> controller,
-    void Function(int? code, String? reason) onClose,
-  )   : _controller = controller,
+    void Function(int? code, String? reason) onClose, {
+    FutureOr<void> Function()? onClosed,
+  })  : _controller = controller,
         _sink = controller.sink,
-        _onClose = onClose;
+        _onClose = onClose,
+        _afterClose = onClosed;
 
   final StreamController<dynamic> _controller;
   final StreamSink<dynamic> _sink;
   final void Function(int? code, String? reason) _onClose;
+  final FutureOr<void> Function()? _afterClose;
 
   @override
   void add(message) => _sink.add(message);
@@ -2033,8 +2044,13 @@ class _TestWebSocketSink implements WebSocketSink {
   @override
   Future close([int? closeCode, String? closeReason]) async {
     _onClose(closeCode, closeReason);
+    final after = _afterClose?.call();
     if (!_controller.isClosed) {
-      await _controller.close();
+      // Close without awaiting to avoid hanging tests if no listener drains.
+      scheduleMicrotask(() => _controller.close());
+    }
+    if (after is Future) {
+      await after;
     }
   }
 
