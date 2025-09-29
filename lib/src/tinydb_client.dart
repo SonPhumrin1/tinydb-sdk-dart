@@ -804,6 +804,7 @@ class TinyDBClient {
     required String name,
     CollectionSchemaDefinition? schema,
     PrimaryKeyConfig? primaryKey,
+    bool? sync,
   }) async {
     final body = <String, dynamic>{'name': name};
     final schemaJson = schema != null ? jsonEncode(schema.toJson()) : null;
@@ -818,6 +819,9 @@ class TinyDBClient {
       if (pkJson.isNotEmpty) {
         body['primary_key'] = pkJson;
       }
+    }
+    if (sync != null) {
+      body['sync'] = sync;
     }
 
     try {
@@ -1184,6 +1188,7 @@ class CollectionBuilder<T extends Map<String, dynamic>>
       name: _name,
       schema: _schema,
       primaryKey: _primaryKey,
+      sync: true,
     );
     return CollectionClient<T>(_client, _name, meta);
   }
