@@ -104,6 +104,82 @@ print('Created ${stats.created}, updated ${stats.updated}, skipped ${stats.skipp
 
 `syncDocuments` mirrors the CLI's record import behaviour: it looks up each document by primary key, creates it if missing, otherwise patches (or updates) the mutable fields while preserving data integrity.
 
+### Iterate cursor-based query results
+
+```dart
+final users = await db.collection<JsonMap>('users').sync();
+final aggregated = await users.queryAll(
+  {
+    'where': {
+      'and': [
+        {
+          'status': {'eq': 'active'},
+        },
+      ],
+    },
+  },
+  pageLimit: 100,
+);
+
+print('Fetched ${aggregated.items.length} active users');
+if (!aggregated.exhausted) {
+  print('Resume later with cursor: ${aggregated.nextCursor}');
+}
+```
+
+`queryAll` automatically follows TinyDB's cursor-based pagination. It keeps calling `/query` while `next_cursor` is present, aggregates the results, and exposes control knobs:
+
+- `pageLimit` overrides the request limit per page.
+- `maxPages` stops after a fixed number of pages (returns `exhausted = false` if more data remains).
+- `maxItems` trims once the desired number of records is collected.
+- `onPage` lets you inspect each `QueryResult` as it arrives (for streaming or logging).
+- `onProgress` surfaces a lightweight `QueryProgress` snapshot (page count, item count, cursor, done flag) after each page is processed.
+
+### Stream query pages lazily
+
+```dart
+await for (final page in users.queryPages(
+  {
+    'where': {
+      'and': [
+        {
+          'role': {'contains': 'Engineer'},
+        },
+      ],
+    },
+  },
+  pageLimit: 50,
+  maxPages: 5,
+)) {
+  print('Processed ${page.items.length} engineer(s)');
+}
+```
+
+`queryPages` returns an async stream of `QueryResult` objects, following each cursor until exhaustion (or until `maxPages`/`maxItems` thresholds are met). This is handy for chunked ETL pipelines or incremental processing without buffering the entire dataset in memory.
+Pass `onProgress` to observe a rolling `QueryProgress` summary after every emitted page.
+
+### Iterate documents as they arrive
+
+```dart
+await for (final record in users.queryStream(
+  {
+    'where': {
+      'and': [
+        {
+          'role': {'contains': 'Engineer'},
+        },
+      ],
+    },
+  },
+  maxItems: 250,
+)) {
+  print('Processing engineer: ${record.data['name']}');
+}
+```
+
+`queryStream` is built on top of `queryPages` and emits each `DocumentRecord` immediately. It honours the same throttling parameters (`pageLimit`, `maxPages`, `maxItems`) so you can cap the work while still benefiting from a simple async `for` loop.
+Specify `onProgress` to receive updates once each page is drained (including total items streamed so far and whether more data remains).
+
 ### Run the example against a real API
 
 ```bash

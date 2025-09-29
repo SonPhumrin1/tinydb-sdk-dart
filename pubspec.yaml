@@ -1,7 +1,7 @@
 name: tinydb_client
 version: 0.1.0
 description: TinyDB Dart/Flutter client SDK for interacting with TinyDB collections and documents.
-repository: https://github.com/cubetiqlabs/tinydb
+repository: https://github.com/cubetiqlabs/tinydb-sdk-dart.git
 publish_to: "none"
 
 environment:
@@ -11,6 +11,7 @@ dependencies:
   http: ^1.2.0
   meta: ^1.10.0
   collection: ^1.18.0
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   lints: ^3.0.0

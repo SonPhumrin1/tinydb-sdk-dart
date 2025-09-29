@@ -4,6 +4,29 @@ import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:http/http.dart' as http;
 import 'package:meta/meta.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+typedef WebSocketConnector = WebSocketChannel Function(
+  Uri uri, {
+  Iterable<String>? protocols,
+  Map<String, dynamic>? headers,
+  Duration? pingInterval,
+});
+
+WebSocketChannel _defaultWebSocketConnector(
+  Uri uri, {
+  Iterable<String>? protocols,
+  Map<String, dynamic>? headers,
+  Duration? pingInterval,
+}) {
+  return IOWebSocketChannel.connect(
+    uri,
+    protocols: protocols,
+    headers: headers,
+    pingInterval: pingInterval,
+  );
+}
 
 typedef JsonMap = Map<String, dynamic>;
 
@@ -243,6 +266,206 @@ class QueryResult<T extends Map<String, dynamic>> {
   final Pagination pagination;
 
   const QueryResult({required this.items, required this.pagination});
+}
+
+@immutable
+class AggregatedQueryResult<T extends Map<String, dynamic>> {
+  final List<DocumentRecord<T>> items;
+  final int pageCount;
+  final bool exhausted;
+  final Pagination lastPagination;
+
+  const AggregatedQueryResult({
+    required this.items,
+    required this.pageCount,
+    required this.exhausted,
+    required this.lastPagination,
+  });
+
+  String? get nextCursor => lastPagination.nextCursor;
+}
+
+@immutable
+class QueryProgress {
+  final int pageCount;
+  final int itemCount;
+  final Pagination lastPagination;
+  final bool done;
+  final int? maxPages;
+  final int? maxItems;
+
+  const QueryProgress({
+    required this.pageCount,
+    required this.itemCount,
+    required this.lastPagination,
+    required this.done,
+    this.maxPages,
+    this.maxItems,
+  });
+
+  String? get nextCursor => lastPagination.nextCursor;
+  bool get hasNextCursor => nextCursor != null && nextCursor!.isNotEmpty;
+}
+
+enum CollectionWatchEventKind {
+  initial,
+  ack,
+  create,
+  update,
+  delete,
+  keepalive,
+  error,
+}
+
+@immutable
+class CollectionWatchEvent<T extends Map<String, dynamic>> {
+  final CollectionWatchEventKind kind;
+  final String? documentId;
+  final T? data;
+  final DocumentRecord<T>? document;
+  final DateTime? timestamp;
+  final Map<String, dynamic>? raw;
+
+  const CollectionWatchEvent({
+    required this.kind,
+    this.documentId,
+    this.data,
+    this.document,
+    this.timestamp,
+    this.raw,
+  });
+
+  factory CollectionWatchEvent.initial(DocumentRecord<T> document) {
+    return CollectionWatchEvent<T>(
+      kind: CollectionWatchEventKind.initial,
+      documentId: document.id,
+      data: document.data,
+      document: document,
+      timestamp: DateTime.tryParse(document.updatedAt) ??
+          DateTime.tryParse(document.createdAt),
+      raw: null,
+    );
+  }
+
+  factory CollectionWatchEvent.ack(Map<String, dynamic> payload) {
+    return CollectionWatchEvent<T>(
+      kind: CollectionWatchEventKind.ack,
+      raw: Map<String, dynamic>.from(payload),
+    );
+  }
+
+  factory CollectionWatchEvent.change({
+    required CollectionWatchEventKind kind,
+    String? documentId,
+    T? data,
+    DocumentRecord<T>? document,
+    DateTime? timestamp,
+    Map<String, dynamic>? raw,
+  }) {
+    return CollectionWatchEvent<T>(
+      kind: kind,
+      documentId: documentId,
+      data: data,
+      document: document,
+      timestamp: timestamp,
+      raw: raw != null ? Map<String, dynamic>.from(raw) : null,
+    );
+  }
+
+  factory CollectionWatchEvent.keepalive(Map<String, dynamic>? payload) {
+    return CollectionWatchEvent<T>(
+      kind: CollectionWatchEventKind.keepalive,
+      raw: payload != null ? Map<String, dynamic>.from(payload) : null,
+    );
+  }
+
+  factory CollectionWatchEvent.error(Object error,
+      {Map<String, dynamic>? raw}) {
+    return CollectionWatchEvent<T>(
+      kind: CollectionWatchEventKind.error,
+      raw: {
+        'error': error.toString(),
+        if (raw != null) 'payload': Map<String, dynamic>.from(raw),
+      },
+    );
+  }
+}
+
+abstract class CancellationToken {
+  bool get isCancelled;
+  Future<void> get whenCancelled;
+
+  const CancellationToken();
+
+  static const CancellationToken none = _NoneCancellationToken();
+
+  factory CancellationToken.fromFuture(Future<void> future) {
+    return _FutureCancellationToken(future);
+  }
+}
+
+class CancellationTokenSource {
+  CancellationTokenSource();
+
+  final Completer<void> _completer = Completer<void>();
+  bool _cancelled = false;
+
+  CancellationToken get token =>
+      _SourceCancellationToken(_completer.future, () => _cancelled);
+
+  bool get isCancelled => _cancelled;
+
+  void cancel() {
+    if (_cancelled) {
+      return;
+    }
+    _cancelled = true;
+    _completer.complete();
+  }
+}
+
+class _NoneCancellationToken implements CancellationToken {
+  const _NoneCancellationToken();
+
+  static final Future<void> _never = Completer<void>().future;
+
+  @override
+  bool get isCancelled => false;
+
+  @override
+  Future<void> get whenCancelled => _never;
+}
+
+class _FutureCancellationToken implements CancellationToken {
+  _FutureCancellationToken(Future<void> future)
+      : whenCancelled = future,
+        _isCancelled = false {
+    future.catchError((_) {});
+    future.whenComplete(() {
+      _isCancelled = true;
+    });
+  }
+
+  @override
+  bool get isCancelled => _isCancelled;
+
+  @override
+  final Future<void> whenCancelled;
+
+  bool _isCancelled;
+}
+
+class _SourceCancellationToken implements CancellationToken {
+  _SourceCancellationToken(this._future, this._isCancelled);
+
+  final Future<void> _future;
+  final bool Function() _isCancelled;
+
+  @override
+  bool get isCancelled => _isCancelled();
+
+  @override
+  Future<void> get whenCancelled => _future;
 }
 
 @immutable
@@ -520,17 +743,20 @@ class TinyDBClient {
   final String? _appId;
   final http.Client _httpClient;
   final bool _ownsClient;
+  final WebSocketConnector _webSocketConnector;
 
   TinyDBClient({
     required String endpoint,
     required String apiKey,
     String? appId,
     http.Client? httpClient,
+    WebSocketConnector? webSocketConnector,
   })  : _endpoint = _normalizeEndpoint(endpoint),
         _apiKey = apiKey,
         _appId = appId,
         _httpClient = httpClient ?? http.Client(),
-        _ownsClient = httpClient == null;
+        _ownsClient = httpClient == null,
+        _webSocketConnector = webSocketConnector ?? _defaultWebSocketConnector;
 
   static String _normalizeEndpoint(String endpoint) {
     final trimmed = endpoint.trim();
@@ -860,6 +1086,54 @@ class TinyDBClient {
     return uri.replace(queryParameters: {...uri.queryParameters, ...filtered});
   }
 
+  Uri _buildWebSocketUri(
+    String path, {
+    Map<String, String?>? query,
+  }) {
+    final base = Uri.parse(_endpoint);
+    final scheme = base.scheme == 'https' ? 'wss' : 'ws';
+    final normalized = path.startsWith('/') ? path : '/$path';
+    final uri = Uri(
+      scheme: scheme,
+      userInfo: base.userInfo,
+      host: base.host,
+      port: base.hasPort ? base.port : null,
+      path: normalized,
+    );
+    if (query == null || query.isEmpty) {
+      return uri;
+    }
+    final filtered = <String, String>{};
+    for (final entry in query.entries) {
+      final value = entry.value;
+      if (value != null && value.isNotEmpty) {
+        filtered[entry.key] = value;
+      }
+    }
+    return uri.replace(queryParameters: filtered.isEmpty ? null : filtered);
+  }
+
+  WebSocketChannel _connectWebSocket(
+    String path, {
+    Map<String, String?>? query,
+    Iterable<String>? protocols,
+    Duration? pingInterval,
+  }) {
+    final uri = _buildWebSocketUri(path, query: query);
+    final headers = <String, dynamic>{
+      'authorization': 'Bearer $_apiKey',
+    };
+    if (_appId != null && _appId!.isNotEmpty) {
+      headers['x-app-id'] = _appId;
+    }
+    return _webSocketConnector(
+      uri,
+      headers: headers,
+      protocols: protocols,
+      pingInterval: pingInterval,
+    );
+  }
+
   TinyDBException _parseError(http.Response response) {
     dynamic payload;
     if (response.body.isNotEmpty) {
@@ -1140,6 +1414,524 @@ class CollectionClient<T extends Map<String, dynamic>> {
       items: items,
       pagination: Pagination.fromJson(response['pagination']),
     );
+  }
+
+  Future<AggregatedQueryResult<T>> queryAll(
+    Map<String, dynamic> request, {
+    int? pageLimit,
+    int? maxPages,
+    int? maxItems,
+    void Function(QueryResult<T> page)? onPage,
+    void Function(QueryProgress progress)? onProgress,
+    CancellationToken? cancellationToken,
+  }) async {
+    if (maxPages != null && maxPages <= 0) {
+      return AggregatedQueryResult<T>(
+        items: List<DocumentRecord<T>>.empty(growable: false),
+        pageCount: 0,
+        exhausted: false,
+        lastPagination: const Pagination(),
+      );
+    }
+
+    if (maxItems != null && maxItems <= 0) {
+      return AggregatedQueryResult<T>(
+        items: List<DocumentRecord<T>>.empty(growable: false),
+        pageCount: 0,
+        exhausted: false,
+        lastPagination: const Pagination(),
+      );
+    }
+
+    final baseRequest = Map<String, dynamic>.from(request);
+    if (pageLimit != null) {
+      baseRequest['limit'] = pageLimit;
+    }
+
+    String? cursor = baseRequest['cursor'] as String?;
+    final collected = <DocumentRecord<T>>[];
+    var pageCount = 0;
+    var exhausted = true;
+    var lastPagination = const Pagination();
+    final token = cancellationToken ?? CancellationToken.none;
+
+    while (true) {
+      if (token.isCancelled) {
+        exhausted = false;
+        onProgress?.call(QueryProgress(
+          pageCount: pageCount,
+          itemCount: collected.length,
+          lastPagination: lastPagination,
+          done: true,
+          maxPages: maxPages,
+          maxItems: maxItems,
+        ));
+        break;
+      }
+
+      final pageRequest = Map<String, dynamic>.from(baseRequest);
+      if (cursor != null && cursor.isNotEmpty) {
+        pageRequest['cursor'] = cursor;
+      } else {
+        pageRequest.remove('cursor');
+      }
+
+      final page = await query(pageRequest);
+      pageCount += 1;
+      onPage?.call(page);
+      lastPagination = page.pagination;
+
+      if (page.items.isNotEmpty) {
+        collected.addAll(page.items);
+      }
+
+      cursor = page.pagination.nextCursor;
+      final hasCursor = cursor != null && cursor.isNotEmpty;
+
+      if (maxItems != null && collected.length > maxItems) {
+        collected.removeRange(maxItems, collected.length);
+      }
+
+      final reachedMaxItems = maxItems != null && collected.length >= maxItems;
+      final reachedMaxPages = maxPages != null && pageCount >= maxPages;
+      final cancelled = token.isCancelled;
+      final done =
+          cancelled || !hasCursor || reachedMaxPages || reachedMaxItems;
+
+      onProgress?.call(QueryProgress(
+        pageCount: pageCount,
+        itemCount: collected.length,
+        lastPagination: page.pagination,
+        done: done,
+        maxPages: maxPages,
+        maxItems: maxItems,
+      ));
+
+      if (cancelled) {
+        exhausted = false;
+        break;
+      }
+
+      if (!hasCursor) {
+        exhausted = true;
+        break;
+      }
+
+      if (reachedMaxPages) {
+        exhausted = false;
+        break;
+      }
+
+      if (reachedMaxItems) {
+        exhausted = false;
+        break;
+      }
+    }
+
+    return AggregatedQueryResult<T>(
+      items: List<DocumentRecord<T>>.unmodifiable(collected),
+      pageCount: pageCount,
+      exhausted: exhausted,
+      lastPagination: lastPagination,
+    );
+  }
+
+  Stream<QueryResult<T>> queryPages(
+    Map<String, dynamic> request, {
+    int? pageLimit,
+    int? maxPages,
+    int? maxItems,
+    void Function(QueryProgress progress)? onProgress,
+    CancellationToken? cancellationToken,
+  }) async* {
+    if (maxPages != null && maxPages <= 0) {
+      return;
+    }
+    if (maxItems != null && maxItems <= 0) {
+      return;
+    }
+
+    final baseRequest = Map<String, dynamic>.from(request);
+    if (pageLimit != null) {
+      baseRequest['limit'] = pageLimit;
+    }
+
+    String? cursor = baseRequest['cursor'] as String?;
+    var pageCount = 0;
+    var emittedItems = 0;
+    Pagination lastPagination = const Pagination();
+    final token = cancellationToken ?? CancellationToken.none;
+
+    while (true) {
+      if (token.isCancelled) {
+        onProgress?.call(QueryProgress(
+          pageCount: pageCount,
+          itemCount: emittedItems,
+          lastPagination: lastPagination,
+          done: true,
+          maxPages: maxPages,
+          maxItems: maxItems,
+        ));
+        break;
+      }
+
+      if (maxItems != null && emittedItems >= maxItems) {
+        onProgress?.call(QueryProgress(
+          pageCount: pageCount,
+          itemCount: emittedItems,
+          lastPagination: lastPagination,
+          done: true,
+          maxPages: maxPages,
+          maxItems: maxItems,
+        ));
+        break;
+      }
+
+      final pageRequest = Map<String, dynamic>.from(baseRequest);
+      if (cursor != null && cursor.isNotEmpty) {
+        pageRequest['cursor'] = cursor;
+      } else {
+        pageRequest.remove('cursor');
+      }
+
+      final page = await query(pageRequest);
+      pageCount += 1;
+      lastPagination = page.pagination;
+
+      final nextCursor = page.pagination.nextCursor;
+      final hasCursor = nextCursor != null && nextCursor.isNotEmpty;
+
+      var remainingItems =
+          maxItems != null ? maxItems - emittedItems : page.items.length;
+      if (remainingItems < 0) {
+        remainingItems = 0;
+      }
+      final shouldTrim = maxItems != null && remainingItems < page.items.length;
+      final itemsToEmit = shouldTrim
+          ? page.items.take(remainingItems).toList(growable: false)
+          : page.items;
+      final emitPage = shouldTrim
+          ? QueryResult<T>(items: itemsToEmit, pagination: page.pagination)
+          : page;
+
+      emittedItems += itemsToEmit.length;
+      if (itemsToEmit.isNotEmpty || !shouldTrim) {
+        yield emitPage;
+      }
+
+      final reachedMaxPages = maxPages != null && pageCount >= maxPages;
+      final reachedMaxItems = maxItems != null && emittedItems >= maxItems;
+      final done =
+          token.isCancelled || !hasCursor || reachedMaxPages || reachedMaxItems;
+
+      onProgress?.call(QueryProgress(
+        pageCount: pageCount,
+        itemCount: emittedItems,
+        lastPagination: page.pagination,
+        done: done,
+        maxPages: maxPages,
+        maxItems: maxItems,
+      ));
+
+      if (done) {
+        break;
+      }
+
+      cursor = nextCursor;
+    }
+  }
+
+  Stream<DocumentRecord<T>> queryStream(
+    Map<String, dynamic> request, {
+    int? pageLimit,
+    int? maxPages,
+    int? maxItems,
+    void Function(QueryProgress progress)? onProgress,
+    CancellationToken? cancellationToken,
+  }) async* {
+    final token = cancellationToken ?? CancellationToken.none;
+    await for (final page in queryPages(
+      request,
+      pageLimit: pageLimit,
+      maxPages: maxPages,
+      maxItems: maxItems,
+      cancellationToken: token,
+      onProgress: onProgress,
+    )) {
+      for (final doc in page.items) {
+        if (token.isCancelled) {
+          return;
+        }
+        yield doc;
+      }
+      if (token.isCancelled) {
+        return;
+      }
+    }
+  }
+
+  Stream<CollectionWatchEvent<T>> watch({
+    bool includeInitial = true,
+    Map<String, dynamic>? initialQuery,
+    int? initialPageLimit,
+    int? initialMaxPages,
+    int? initialMaxItems,
+    void Function(QueryProgress progress)? onProgress,
+    CancellationToken? cancellationToken,
+    Duration? pingInterval,
+  }) {
+    final token = cancellationToken ?? CancellationToken.none;
+    final controller = StreamController<CollectionWatchEvent<T>>();
+    WebSocketChannel? channel;
+    StreamSubscription? subscription;
+    var closing = false;
+    var pageCount = 0;
+    var totalItems = 0;
+    var lastPagination = const Pagination();
+
+    Future<void> closeController({bool notifyProgress = true}) async {
+      if (closing) {
+        return;
+      }
+      closing = true;
+      try {
+        await subscription?.cancel();
+      } catch (_) {}
+      try {
+        await channel?.sink.close();
+      } catch (_) {}
+      if (notifyProgress) {
+        onProgress?.call(QueryProgress(
+          pageCount: pageCount,
+          itemCount: totalItems,
+          lastPagination: lastPagination,
+          done: true,
+        ));
+      }
+      if (!controller.isClosed) {
+        await controller.close();
+      }
+    }
+
+    token.whenCancelled.then((_) => closeController());
+
+    Future<void> pumpInitial() async {
+      if (!includeInitial) {
+        return;
+      }
+
+      final request = Map<String, dynamic>.from(initialQuery ?? const {});
+      try {
+        await for (final record in queryStream(
+          request,
+          pageLimit: initialPageLimit,
+          maxPages: initialMaxPages,
+          maxItems: initialMaxItems,
+          cancellationToken: token,
+          onProgress: (progress) {
+            pageCount = progress.pageCount;
+            totalItems = progress.itemCount;
+            lastPagination = progress.lastPagination;
+            onProgress?.call(progress);
+          },
+        )) {
+          if (token.isCancelled || controller.isClosed) {
+            break;
+          }
+          controller.add(CollectionWatchEvent<T>.initial(record));
+        }
+      } catch (error, stackTrace) {
+        if (!controller.isClosed) {
+          controller.addError(error, stackTrace);
+        }
+        rethrow;
+      }
+    }
+
+    void handleRealtimeMessage(dynamic message) {
+      if (controller.isClosed) {
+        return;
+      }
+      final payload = _decodeRealtimeMessage(message);
+      if (payload == null) {
+        return;
+      }
+
+      if (payload['ok'] == true) {
+        controller.add(CollectionWatchEvent<T>.ack(payload));
+        onProgress?.call(QueryProgress(
+          pageCount: pageCount,
+          itemCount: totalItems,
+          lastPagination: lastPagination,
+          done: token.isCancelled,
+        ));
+        return;
+      }
+
+      final kind = _mapRealtimeKind(payload['type']?.toString());
+      if (kind == CollectionWatchEventKind.ack) {
+        controller.add(CollectionWatchEvent<T>.ack(payload));
+        onProgress?.call(QueryProgress(
+          pageCount: pageCount,
+          itemCount: totalItems,
+          lastPagination: lastPagination,
+          done: token.isCancelled,
+        ));
+        return;
+      }
+      if (kind == CollectionWatchEventKind.error) {
+        controller.add(CollectionWatchEvent<T>.change(
+          kind: CollectionWatchEventKind.error,
+          raw: payload,
+        ));
+        return;
+      }
+
+      if (kind == CollectionWatchEventKind.keepalive) {
+        controller.add(CollectionWatchEvent<T>.keepalive(payload));
+        return;
+      }
+
+      DocumentRecord<T>? document;
+      if (payload['document'] is Map<String, dynamic>) {
+        document =
+            _parseDocument<T>(payload['document'] as Map<String, dynamic>);
+      }
+
+      final T? data = _castRealtimeData(payload['data']);
+      final id = payload['id']?.toString();
+      DateTime? timestamp;
+      final ts = payload['ts'];
+      if (ts is String) {
+        timestamp = DateTime.tryParse(ts);
+      } else if (ts is int) {
+        timestamp = DateTime.fromMillisecondsSinceEpoch(ts, isUtc: true);
+      }
+
+      controller.add(CollectionWatchEvent<T>.change(
+        kind: kind,
+        documentId: document?.id ?? id,
+        data: document?.data ?? data,
+        document: document,
+        timestamp: timestamp,
+        raw: payload,
+      ));
+
+      if (kind != CollectionWatchEventKind.keepalive &&
+          kind != CollectionWatchEventKind.ack) {
+        totalItems += 1;
+      }
+
+      onProgress?.call(QueryProgress(
+        pageCount: pageCount,
+        itemCount: totalItems,
+        lastPagination: lastPagination,
+        done: token.isCancelled,
+      ));
+    }
+
+    controller.onListen = () {
+      Future<void>(() async {
+        try {
+          await pumpInitial();
+
+          if (token.isCancelled) {
+            await closeController();
+            return;
+          }
+
+          channel = _client._connectWebSocket(
+            '/subscribe/${Uri.encodeComponent(name)}',
+            pingInterval: pingInterval,
+          );
+
+          subscription = channel!.stream.listen(
+            handleRealtimeMessage,
+            onError: (error, stackTrace) async {
+              if (!controller.isClosed) {
+                controller.addError(error, stackTrace);
+              }
+              await closeController();
+            },
+            onDone: () async {
+              await closeController();
+            },
+            cancelOnError: false,
+          );
+        } catch (error, stackTrace) {
+          if (!controller.isClosed) {
+            controller.addError(error, stackTrace);
+          }
+          await closeController();
+        }
+      });
+    };
+
+    controller.onCancel = () => closeController();
+
+    return controller.stream;
+  }
+
+  static Map<String, dynamic>? _decodeRealtimeMessage(dynamic message) {
+    try {
+      if (message is String) {
+        final decoded = jsonDecode(message);
+        if (decoded is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded);
+        }
+      } else if (message is List<int>) {
+        final decoded = jsonDecode(utf8.decode(message));
+        if (decoded is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded);
+        }
+      } else if (message is Map<String, dynamic>) {
+        return Map<String, dynamic>.from(message);
+      }
+    } catch (_) {
+      return null;
+    }
+    return null;
+  }
+
+  static CollectionWatchEventKind _mapRealtimeKind(String? type) {
+    switch (type?.toLowerCase()) {
+      case 'create':
+        return CollectionWatchEventKind.create;
+      case 'update':
+        return CollectionWatchEventKind.update;
+      case 'delete':
+        return CollectionWatchEventKind.delete;
+      case 'keepalive':
+      case 'ping':
+        return CollectionWatchEventKind.keepalive;
+      case 'ack':
+        return CollectionWatchEventKind.ack;
+      default:
+        return CollectionWatchEventKind.error;
+    }
+  }
+
+  T? _castRealtimeData(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is T) {
+      return value;
+    }
+    if (value is Map<String, dynamic>) {
+      return Map<String, dynamic>.from(value) as T;
+    }
+    if (value is String && value.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded) as T;
+        }
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
   }
 
   Future<SyncResult<T>> sync([SyncParams params = const SyncParams()]) async {

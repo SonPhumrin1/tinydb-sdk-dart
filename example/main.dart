@@ -115,6 +115,61 @@ Future<void> main() async {
     stdout.writeln(
         'Query returned ${query.items.length} document(s) for uid=$uid');
 
+    final allDocs = await collection.queryAll(
+      {
+        'where': {
+          'and': [
+            {
+              'role': {'contains': 'Engineer'},
+            },
+          ],
+        },
+      },
+      pageLimit: 25,
+      onProgress: (progress) {
+        stdout.writeln(
+            'queryAll progress page=${progress.pageCount} items=${progress.itemCount} done=${progress.done} nextCursor=${progress.nextCursor ?? '-'}');
+      },
+    );
+    stdout.writeln(
+        'queryAll gathered ${allDocs.items.length} engineer record(s); exhausted=${allDocs.exhausted} nextCursor=${allDocs.nextCursor ?? '-'}');
+
+    await for (final page in collection.queryPages(
+      {
+        'where': {
+          'and': [
+            {
+              'role': {'contains': 'Engineer'},
+            },
+          ],
+        },
+      },
+      pageLimit: 10,
+      maxPages: 2,
+    )) {
+      stdout.writeln('queryPages streamed ${page.items.length} item(s)');
+    }
+
+    await for (final record in collection.queryStream(
+      {
+        'where': {
+          'and': [
+            {
+              'role': {'contains': 'Engineer'},
+            },
+          ],
+        },
+      },
+      maxItems: 1,
+      onProgress: (progress) {
+        stdout.writeln(
+            'queryStream progress page=${progress.pageCount} items=${progress.itemCount} done=${progress.done} nextCursor=${progress.nextCursor ?? '-'}');
+      },
+    )) {
+      stdout.writeln(
+          'queryStream emitted ${record.data['uid']} (${record.data['role']})');
+    }
+
     final syncChanges = await collection.sync();
     stdout.writeln(
         'Sync returned ${syncChanges.items.length} change(s) (pagination count: ${syncChanges.pagination.count ?? 0}).');
