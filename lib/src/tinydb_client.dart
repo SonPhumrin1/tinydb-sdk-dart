@@ -1329,11 +1329,12 @@ class CollectionClient<T extends Map<String, dynamic>> {
 
   Future<List<DocumentRecord<T>>> createMany(
     List<Map<String, dynamic>> docs,
+    bool? sync, // whether to sync the records upon creation (if pk exists, they will be updated instead)
   ) async {
     if (docs.isEmpty) return const [];
     final response = await _client._request<Map<String, dynamic>>(
       method: 'POST',
-      path: '/api/collections/${Uri.encodeComponent(name)}/documents/bulk',
+      path: '/api/collections/${Uri.encodeComponent(name)}/documents/bulk?sync=${sync == true ? 'true' : 'false'}',
       body: docs,
     );
     return (response['items'] as List<dynamic>? ?? [])
