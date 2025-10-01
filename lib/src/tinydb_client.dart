@@ -770,6 +770,7 @@ class DocumentRecord<T extends Map<String, dynamic>> {
   final String key;
   final num? keyNumeric;
   final T data;
+  final int version;
   final String createdAt;
   final String updatedAt;
   final String? deletedAt;
@@ -780,6 +781,7 @@ class DocumentRecord<T extends Map<String, dynamic>> {
     required this.collectionId,
     required this.key,
     required this.data,
+    required this.version,
     required this.createdAt,
     required this.updatedAt,
     this.keyNumeric,
@@ -2083,6 +2085,17 @@ DocumentRecord<T> _parseDocument<T extends Map<String, dynamic>>(
     data['_doc_id'] = docId;
   }
 
+  final rawVersion = payload['version'];
+  var version = 1;
+  if (rawVersion is num) {
+    version = rawVersion.round();
+  } else if (rawVersion is String) {
+    final parsed = int.tryParse(rawVersion);
+    if (parsed != null) {
+      version = parsed;
+    }
+  }
+
   return DocumentRecord<T>(
     id: payload['id'] as String,
     tenantId: payload['tenant_id'] as String,
@@ -2091,6 +2104,7 @@ DocumentRecord<T> _parseDocument<T extends Map<String, dynamic>>(
     keyNumeric:
         payload['key_numeric'] is num ? payload['key_numeric'] as num : null,
     data: Map<String, dynamic>.from(data) as T,
+    version: version,
     createdAt: payload['created_at'] as String,
     updatedAt: payload['updated_at'] as String,
     deletedAt: payload['deleted_at'] as String?,

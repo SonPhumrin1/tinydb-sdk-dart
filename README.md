@@ -51,6 +51,7 @@ Future<void> main() async {
   });
 
   final fetched = await users.get(created.id);
+  print('Document version: ${fetched.version}');
   print('Fetched user: ${fetched.data}');
 }
 ```

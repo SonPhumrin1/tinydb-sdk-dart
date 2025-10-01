@@ -383,6 +383,64 @@ void main() {
     });
   });
 
+  test('parses document version metadata', () async {
+    final mock = MockClient((request) async {
+      if (request.method == 'POST' && request.url.path == '/api/collections') {
+        return http.Response(
+          jsonEncode(baseCollectionResponse),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.method == 'GET' &&
+          request.url.path == '/api/collections/users/documents/doc-1') {
+        return http.Response(
+          jsonEncode({
+            'id': 'doc-1',
+            'tenant_id': 'tenant-1',
+            'collection_id': 'users',
+            'key': 'doc-1',
+            'key_numeric': null,
+            'data': {
+              'uid': 'user-1',
+              'name': 'Alice',
+            },
+            'version': 7,
+            'created_at': '2024-01-01T00:00:00Z',
+            'updated_at': '2024-01-02T00:00:00Z',
+            'deleted_at': null,
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('not found', 404);
+    });
+
+    final client = TinyDBClient(
+      endpoint: 'https://db.example.com',
+      apiKey: 'demo-key',
+      httpClient: mock,
+    );
+
+    final users = await client
+        .collection<JsonMap>('users')
+        .schema(
+          CollectionSchemaDefinition(
+            fields: {
+              'uid': FieldDefinition.string(required: true),
+              'name': FieldDefinition.string(required: true),
+            },
+          ),
+        )
+        .sync();
+
+    final record = await users.get('doc-1');
+    expect(record.version, 7);
+
+    await client.close();
+  });
+
   test('sync creates or updates collection schema', () async {
     final requests = <http.Request>[];
     final mock = MockClient((request) async {
