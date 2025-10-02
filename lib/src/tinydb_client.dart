@@ -1481,6 +1481,19 @@ class CollectionClient<T extends Map<String, dynamic>> {
     return _parseDocument<T>(response);
   }
 
+  Future<DocumentRecord<T>> updateByPrimaryKey(
+    String key,
+    Map<String, dynamic> doc,
+  ) async {
+    final response = await _client._request<Map<String, dynamic>>(
+      method: 'PUT',
+      path:
+          '/api/collections/${Uri.encodeComponent(name)}/documents/primary/${Uri.encodeComponent(key)}',
+      body: doc,
+    );
+    return _parseDocument<T>(response);
+  }
+
   Future<DocumentRecord<T>> patch(
     String id,
     Map<String, dynamic> doc,
