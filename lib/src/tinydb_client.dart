@@ -1443,6 +1443,19 @@ class CollectionClient<T extends Map<String, dynamic>> {
     return _parseDocument<T>(response);
   }
 
+  Future<DocumentRecord<T>> patchByPrimaryKey(
+    String key,
+    Map<String, dynamic> doc,
+  ) async {
+    final response = await _client._request<Map<String, dynamic>>(
+      method: 'PATCH',
+      path:
+          '/api/collections/${Uri.encodeComponent(name)}/documents/primary/${Uri.encodeComponent(key)}',
+      body: doc,
+    );
+    return _parseDocument<T>(response);
+  }
+
   Future<void> delete(dynamic id) async {
     if (id is Iterable) {
       for (final docId in id) {
@@ -1454,6 +1467,21 @@ class CollectionClient<T extends Map<String, dynamic>> {
       method: 'DELETE',
       path:
           '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id.toString())}',
+      expectResponseBody: false,
+    );
+  }
+
+  Future<void> deleteByPrimaryKey(dynamic key, {bool purge = false}) async {
+    if (key is Iterable) {
+      for (final k in key) {
+        await deleteByPrimaryKey(k);
+      }
+      return;
+    }
+    await _client._request<void>(
+      method: 'DELETE',
+      path:
+          '/api/collections/${Uri.encodeComponent(name)}/documents/primary/${Uri.encodeComponent(key)}?purge=${purge ? 'true' : 'false'}',
       expectResponseBody: false,
     );
   }
