@@ -789,6 +789,35 @@ class DocumentRecord<T extends Map<String, dynamic>> {
   });
 }
 
+@immutable
+class DocumentCount {
+  final int count;
+  final int? deletedCount;
+
+  const DocumentCount({required this.count, this.deletedCount});
+
+  factory DocumentCount.fromJson(Map<String, dynamic> json) {
+    return DocumentCount(
+      count: json['count'] as int,
+      deletedCount: json['deleted_count'] as int?,
+    );
+  }
+}
+
+@immutable
+class CollectionCount {
+  final int count;
+  final int? deletedCount;
+
+  const CollectionCount({required this.count, this.deletedCount});
+  factory CollectionCount.fromJson(Map<String, dynamic> json) {
+    return CollectionCount(
+      count: json['count'] as int,
+      deletedCount: json['deleted_count'] as int?,
+    );
+  }
+}
+
 class TinyDBException implements Exception {
   final String message;
   final int status;
@@ -849,6 +878,17 @@ class TinyDBClient {
         .cast<Map<String, dynamic>>()
         .map(CollectionDetails.fromJson)
         .toList(growable: false);
+  }
+
+  Future<CollectionCount> countCollections({bool includeDeleted = false}) async {
+    final response = await _request<Map<String, dynamic>>(
+      method: 'GET',
+      path: '/api/collections/count',
+      query: {
+        'include_deleted': includeDeleted.toString(),
+      },
+    );
+    return CollectionCount.fromJson(response);
   }
 
   Future<CollectionDetails> describeCollection(String name) async {
@@ -1299,7 +1339,7 @@ class CollectionBuilder<T extends Map<String, dynamic>>
 }
 
 class ListOptions {
-  final int? limit;
+  final int? limit; // -1 means no limit
   final int? offset;
   final bool includeDeleted;
   final List<String>? select;
@@ -1387,6 +1427,17 @@ class CollectionClient<T extends Map<String, dynamic>> {
       : _fetchDocument(
           '/api/collections/${Uri.encodeComponent(name)}/documents/${Uri.encodeComponent(id)}',
         );
+
+  Future<DocumentCount> count({bool includeDeleted = false}) async {
+    final response = await _client._request<Map<String, dynamic>>(
+      method: 'GET',
+      path: '/api/collections/${Uri.encodeComponent(name)}/documents/count',
+      query: {
+        'include_deleted': includeDeleted.toString(),
+      },
+    );
+    return DocumentCount.fromJson(response);
+  }
 
   Future<DocumentRecord<T>> getByPrimaryKey(String key) => _fetchDocument(
         '/api/collections/${Uri.encodeComponent(name)}/documents/primary/${Uri.encodeComponent(key)}',
