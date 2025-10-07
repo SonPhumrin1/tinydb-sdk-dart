@@ -2287,7 +2287,6 @@ Future<RecordSyncStats> _syncCollectionRecords<T extends Map<String, dynamic>>(
     DocumentRecord<T>? existing;
     try {
       existing = await collection.getByPrimaryKey(key);
-      print("Syncing record with key: $existing $key");
     } on TinyDBException catch (error) {
       if (error.status != 404) {
         stats = stats.add(failed: 1);
@@ -2297,7 +2296,6 @@ Future<RecordSyncStats> _syncCollectionRecords<T extends Map<String, dynamic>>(
 
     if (existing == null) {
       final payload = _prepareRecordCreatePayload(record);
-      print("Creating record with payload: $payload");
       if (payload.isEmpty) {
         stats = stats.add(skipped: 1);
         continue;
